@@ -1,221 +1,248 @@
-# Illumistream Server Deployment Guide
-
-This guide explains how to deploy the Illumistream streaming server on your dedicated server with EasyPanel.
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Browser                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  Illumistream App (React)                                 │  │
-│  │  - Captures video/audio via getUserMedia                 │  │
-│  │  - Records with MediaRecorder                            │  │
-│  │  - Sends video chunks via WebSocket                      │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              │ WebSocket (video chunks)
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Your EasyPanel Server                         │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  Illumistream Server (Node.js + FFmpeg)                   │  │
-│  │  - Receives WebSocket connections                         │  │
-│  │  - Spawns FFmpeg for each stream destination             │  │
-│  │  - Converts WebM → RTMP                                  │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              │ RTMP streams
-                              ▼
-        ┌─────────────┬─────────────┬─────────────┐
-        │   YouTube   │   Twitch    │    Kick     │
-        │   Live      │   Live      │    Live     │
-        └─────────────┴─────────────┴─────────────┘
-```
+# Running Illumistream Server Directly (No Docker)
 
 ## Prerequisites
 
-- A server with EasyPanel installed
-- Docker support (included with EasyPanel)
-- A domain name (for HTTPS WebSocket connections)
+### 1. Install Node.js 20+
 
-## Deployment Steps
+```bash
+# Using NodeSource (recommended)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
 
-### Option 1: Deploy via EasyPanel UI (Recommended)
-
-1. **Create a new App in EasyPanel**
-   - Go to your EasyPanel dashboard
-   - Click "Create Service" → "App"
-   - Name it `illumistream-server`
-
-2. **Configure the Source**
-   - Source Type: Git
-   - Repository: Upload this `server` folder to your Git repo
-   - Or use "Dockerfile" source and paste the Dockerfile content
-
-3. **Environment Variables**
-   ```
-   NODE_ENV=production
-   PORT=3001
-   ```
-
-4. **Port Configuration**
-   - Internal Port: 3001
-   - Enable HTTPS (required for WebSocket from HTTPS frontend)
-
-5. **Domain Setup**
-   - Add a domain like `stream.yourdomain.com`
-   - Enable SSL/TLS certificate (Let's Encrypt)
-
-6. **Deploy**
-   - Click Deploy and wait for the build to complete
-
-### Option 2: Deploy via Docker Compose
-
-1. **SSH into your server**
-
-2. **Clone/copy the server folder**
-   ```bash
-   mkdir -p /opt/illumistream
-   cd /opt/illumistream
-   # Copy server files here
-   ```
-
-3. **Build and run**
-   ```bash
-   docker-compose up -d --build
-   ```
-
-4. **Set up reverse proxy (Nginx/Caddy)**
-   
-   For Caddy (easiest):
-   ```
-   stream.yourdomain.com {
-       reverse_proxy localhost:3001
-   }
-   ```
-   
-   For Nginx:
-   ```nginx
-   server {
-       listen 443 ssl http2;
-       server_name stream.yourdomain.com;
-       
-       ssl_certificate /path/to/cert.pem;
-       ssl_certificate_key /path/to/key.pem;
-       
-       location / {
-           proxy_pass http://localhost:3001;
-           proxy_http_version 1.1;
-           proxy_set_header Upgrade $http_upgrade;
-           proxy_set_header Connection "upgrade";
-           proxy_set_header Host $host;
-           proxy_set_header X-Real-IP $remote_addr;
-           proxy_read_timeout 86400;
-       }
-   }
-   ```
-
-### Option 3: EasyPanel Custom Dockerfile
-
-In EasyPanel, create a new service with this configuration:
-
-**Dockerfile:**
-```dockerfile
-FROM node:20-slim
-
-RUN apt-get update && \
-    apt-get install -y ffmpeg curl && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-
-COPY package*.json ./
-RUN npm install --production
-
-COPY . .
-
-EXPOSE 3001
-
-CMD ["node", "index.js"]
+# Verify installation
+node --version  # Should be v20.x.x
+npm --version
 ```
 
-## Configuration in Illumistream App
+### 2. Install FFmpeg
 
-Once deployed, configure your streaming server in the app:
+```bash
+sudo apt-get update
+sudo apt-get install -y ffmpeg
 
-1. Open your Illumistream studio
-2. Click the **TV icon** (Stream Settings)
-3. Expand **"Streaming Server"**
-4. Enter your server URL: `https://stream.yourdomain.com`
-5. Add your streaming destinations (YouTube, Twitch, etc.)
-6. Enter your stream keys
-7. Click **"Go Live"**
+# Verify installation
+ffmpeg -version
+```
 
-## Testing
+### 3. Install PM2 (Process Manager)
 
-1. **Health Check**
-   ```bash
-   curl https://stream.yourdomain.com/health
-   # Should return: {"status":"ok","activeStreams":0}
-   ```
+```bash
+sudo npm install -g pm2
+```
 
-2. **WebSocket Test**
-   - The app will automatically test the connection when you click "Go Live"
+---
+
+## Quick Start
+
+### 1. Copy server files to your server
+
+```bash
+# Create directory
+mkdir -p /opt/illumistream
+cd /opt/illumistream
+
+# Copy these files:
+# - index.js
+# - package.json
+# - package-lock.json
+```
+
+### 2. Install dependencies
+
+```bash
+cd /opt/illumistream
+npm ci --omit=dev
+```
+
+### 3. Test the server
+
+```bash
+node index.js
+# Should output: 🚀 Illumistream Server running on port 3001
+```
+
+### 4. Run with PM2 (Production)
+
+```bash
+# Start the server
+pm2 start index.js --name illumistream-server
+
+# Save PM2 config (auto-restart on reboot)
+pm2 save
+pm2 startup
+
+# View logs
+pm2 logs illumistream-server
+
+# Monitor
+pm2 monit
+```
+
+---
+
+## Setting Up HTTPS (Required for Production)
+
+The frontend runs on HTTPS, so WebSocket connections require WSS (secure WebSocket).
+
+### Option A: Caddy (Easiest - Auto HTTPS)
+
+```bash
+# Install Caddy
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update
+sudo apt install caddy
+```
+
+Create `/etc/caddy/Caddyfile`:
+
+```
+stream.yourdomain.com {
+    reverse_proxy localhost:3001
+}
+```
+
+```bash
+# Reload Caddy
+sudo systemctl reload caddy
+```
+
+Caddy automatically provisions Let's Encrypt SSL certificates!
+
+### Option B: Nginx + Certbot
+
+```bash
+# Install Nginx and Certbot
+sudo apt-get install -y nginx certbot python3-certbot-nginx
+```
+
+Create `/etc/nginx/sites-available/illumistream`:
+
+```nginx
+server {
+    listen 80;
+    server_name stream.yourdomain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+        proxy_send_timeout 86400;
+    }
+}
+```
+
+```bash
+# Enable the site
+sudo ln -s /etc/nginx/sites-available/illumistream /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+
+# Get SSL certificate
+sudo certbot --nginx -d stream.yourdomain.com
+```
+
+---
+
+## Firewall Setup
+
+```bash
+# Allow HTTP/HTTPS
+sudo ufw allow 80
+sudo ufw allow 443
+
+# Don't expose 3001 directly (use reverse proxy)
+# sudo ufw deny 3001
+```
+
+---
+
+## Environment Variables (Optional)
+
+Create `/opt/illumistream/.env`:
+
+```bash
+PORT=3001
+NODE_ENV=production
+```
+
+Update PM2 to use it:
+
+```bash
+pm2 delete illumistream-server
+pm2 start index.js --name illumistream-server --env production
+pm2 save
+```
+
+---
+
+## Monitoring & Logs
+
+```bash
+# View live logs
+pm2 logs illumistream-server
+
+# View last 100 lines
+pm2 logs illumistream-server --lines 100
+
+# Monitor CPU/Memory
+pm2 monit
+
+# Check status
+pm2 status
+```
+
+---
+
+## Updating the Server
+
+```bash
+cd /opt/illumistream
+
+# Pull new files (or copy manually)
+# git pull
+
+# Reinstall dependencies if package.json changed
+npm ci --omit=dev
+
+# Restart
+pm2 restart illumistream-server
+```
+
+---
 
 ## Troubleshooting
 
-### "Connection to streaming server failed"
-- Check if the server is running: `docker logs illumistream-server`
-- Verify SSL certificate is valid
-- Ensure WebSocket upgrade is allowed in your reverse proxy
+### "Connection refused" from frontend
+- Check server is running: `pm2 status`
+- Check firewall: `sudo ufw status`
+- Verify reverse proxy is configured
 
-### "FFmpeg error" in server logs
-- Check FFmpeg is installed: `docker exec illumistream-server ffmpeg -version`
-- Verify stream key is correct
-- Check RTMP server URL for the platform
+### "WebSocket connection failed"
+- Ensure HTTPS is set up (WSS requires SSL)
+- Check Nginx/Caddy WebSocket headers are configured
+- Test health endpoint: `curl https://stream.yourdomain.com/health`
 
-### High latency
-- The default configuration has ~2-5 second latency
-- This is normal for RTMP streaming to platforms
-- Lower latency requires different protocols (not RTMP)
+### "FFmpeg not found"
+```bash
+which ffmpeg  # Should return /usr/bin/ffmpeg
+ffmpeg -version
+```
 
-### Stream stops unexpectedly
-- Check server resources (CPU/memory)
-- FFmpeg is CPU-intensive; ensure adequate server specs
-- Recommended: 2+ CPU cores, 2GB+ RAM per concurrent stream
+### High CPU usage
+- FFmpeg is CPU-intensive
+- Each stream destination uses ~1 CPU core
+- Consider upgrading server or limiting concurrent streams
 
-## Server Requirements
-
-| Concurrent Streams | CPU Cores | RAM    |
-|-------------------|-----------|--------|
-| 1-2               | 2         | 2 GB   |
-| 3-5               | 4         | 4 GB   |
-| 5-10              | 8         | 8 GB   |
-
-## Security Notes
-
-1. **Stream Keys**: Stream keys are sent to your server. Ensure HTTPS is enabled.
-2. **Authentication**: Consider adding authentication for production use.
-3. **Rate Limiting**: Add rate limiting to prevent abuse.
-
-## Advanced: Multi-destination Streaming
-
-The server supports streaming to multiple platforms simultaneously. Each destination spawns a separate FFmpeg process.
-
-Example with 3 destinations:
-- YouTube Live
-- Twitch
-- Kick
-
-All three will receive the same stream content.
-
-## Support
-
-For issues specific to:
-- **EasyPanel**: Check EasyPanel documentation
-- **FFmpeg**: Check FFmpeg logs in container
-- **Stream keys**: Check respective platform's documentation
+### Check what's using port 3001
+```bash
+sudo lsof -i :3001
+sudo netstat -tlnp | grep 3001
+```
