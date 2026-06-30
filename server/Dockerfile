@@ -10,14 +10,14 @@ RUN apt-get update && \
 # Create app directory
 WORKDIR /app
 
-# Copy package files (including lockfile for reproducible builds)
-COPY package.json package-lock.json ./
+# Copy package files from server subfolder (build context is project root)
+COPY server/package.json server/package-lock.json ./
 
 # Install dependencies using clean install
 RUN npm ci --omit=dev
 
-# Copy source code
-COPY index.js ./
+# Copy source code from server subfolder
+COPY server/index.js ./
 
 # Expose port
 EXPOSE 3001
