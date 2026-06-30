@@ -6,4 +6,4 @@ npm-debug.log
 .env.*
 *.md
 docker-compose*.yml
-.dockerignore
+easypanel.json

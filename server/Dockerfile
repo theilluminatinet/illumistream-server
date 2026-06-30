@@ -1,23 +1,23 @@
-# Use Node.js with FFmpeg
+# Use Node.js LTS with FFmpeg
 FROM node:20-slim
 
-# Install FFmpeg
+# Install FFmpeg and curl (for healthcheck)
 RUN apt-get update && \
-    apt-get install -y ffmpeg && \
+    apt-get install -y --no-install-recommends ffmpeg curl && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # Create app directory
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Copy package files (including lockfile for reproducible builds)
+COPY package.json package-lock.json ./
 
-# Install dependencies
-RUN npm install --production
+# Install dependencies using clean install
+RUN npm ci --omit=dev
 
 # Copy source code
-COPY . .
+COPY index.js ./
 
 # Expose port
 EXPOSE 3001
